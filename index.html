@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>安全链接分享 - GitHub 认证版</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #f0f2f5; }
+        #auth-container { display: flex; justify-content: center; align-items: center; height: 100vh; }
+        #app-container { display: none; flex-direction: column; height: 100vh; }
+        .header { background: #24292e; color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .main { display: flex; flex: 1; overflow: hidden; padding: 20px; gap: 20px; }
+        .panel { background: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow-y: auto; }
+        #left { flex: 2; }
+        #right { flex: 1; border-left: 4px solid #ffc107; }
+        .link-item { border-bottom: 1px solid #eee; padding: 10px 0; display: flex; justify-content: space-between; }
+        .footer { padding: 20px; background: white; display: flex; gap: 10px; border-top: 1px solid #ddd; }
+        button { cursor: pointer; border: none; border-radius: 4px; padding: 8px 15px; }
+        .btn-login { background: #24292e; color: white; font-size: 1.2rem; padding: 15px 30px; }
+        .btn-send { background: #28a745; color: white; }
+    </style>
+</head>
+<body>
+
+<div id="auth-container">
+    <button class="btn-login" onclick="login()">使用 GitHub 账户登录</button>
+</div>
+
+<div id="app-container">
+    <div class="header">
+        <h2>🔗 内部链接广场</h2>
+        <div>
+            <span id="user-display"></span>
+            <button onclick="logout()" style="background:transparent; color:white; text-decoration:underline;">退出</button>
+        </div>
+    </div>
+
+    <div class="main">
+        <div id="left" class="panel">
+            <h3>所有链接</h3>
+            <div id="link-list"></div>
+        </div>
+        <div id="right" class="panel">
+            <h3>🔥 热门精选</h3>
+            <div id="hot-list"></div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <input type="text" id="link-input" placeholder="输入链接..." style="flex:1; padding:10px;">
+        <button class="btn-send" onclick="addLink()">发送</button>
+    </div>
+</div>
+
+<script>
+    // 配置 Supabase
+    const supabaseUrl = 'sb_publishable_7qlAvSDjtkXUPEoXCNtoiQ_31_E3_FX';
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtibmljbHByZGd4dGRwc2x3ZndyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNjg3NzUsImV4cCI6MjA5Mjk0NDc3NX0.7753EeDPFnVxmT-Cz7yiFNPu4R0UpsKRYPuJlSknbBc';
+    const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+
+    // 模拟白名单 (实际应用中可以存在数据库或 GitHub 仓库文件里)
+    const WHITELIST = ["your_github_username", "friend_username"];
+
+    let currentUser = null;
+
+    // 检查登录状态
+    async function checkUser() {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            const username = user.user_metadata.user_name; // GitHub 用户名
+            
+            // 白名单验证
+            if (!WHITELIST.includes(username)) {
+                alert("对不起，您不在白名单中，无法使用此系统。");
+                await supabase.auth.signOut();
+                return;
+            }
+
+            currentUser = username;
+            document.getElementById('auth-container').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+            document.getElementById('user-display').innerText = `欢迎, ${username}`;
+            loadLinks();
+            
+            // 实时订阅更新 (类似服务器推送)
+            supabase.channel('custom-all-channel')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'links' }, payload => {
+                loadLinks();
+            }).subscribe();
+
+        }
+    }
+
+    async function login() {
+        await supabase.auth.signInWithOAuth({ provider: 'github' });
+    }
+
+    async function logout() {
+        await supabase.auth.signOut();
+        location.reload();
+    }
+
+    async function loadLinks() {
+        const { data: links } = await supabase.from('links').select('*').order('id', { ascending: false });
+        render(links);
+    }
+
+    function render(links) {
+        const listDiv = document.getElementById('link-list');
+        const hotDiv = document.getElementById('hot-list');
+        listDiv.innerHTML = '';
+        hotDiv.innerHTML = '';
+
+        links.forEach(item => {
+            // 渲染左侧
+            const div = document.createElement('div');
+            div.className = 'link-item';
+            div.innerHTML = `
+                <span><strong>${item.author}:</strong> ${item.url} (👍${item.votes})</span>
+                <div>
+                    <button onclick="vote(${item.id}, 1)">👍</button>
+                    <button onclick="vote(${item.id}, -1)">👎</button>
+                </div>
+            `;
+            listDiv.appendChild(div);
+
+            // 渲染右侧
+            if (item.votes > 3) {
+                const hot = document.createElement('div');
+                hot.innerText = `🔥 ${item.url}`;
+                hotDiv.appendChild(hot);
+            }
+        });
+    }
+
+    async function addLink() {
+        const url = document.getElementById('link-input').value;
+        if (!url) return;
+        await supabase.from('links').insert([{ url: url, author: currentUser, votes: 1 }]);
+        document.getElementById('link-input').value = '';
+    }
+
+    async function vote(id, delta) {
+        // 先获取当前票数，再加 delta
+        const { data } = await supabase.from('links').select('votes').eq('id', id).single();
+        await supabase.from('links').update({ votes: data.votes + delta }).eq('id', id);
+    }
+
+    checkUser();
+</script>
+</body>
+</html>
