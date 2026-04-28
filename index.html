@@ -28,7 +28,7 @@
 
 <div id="app-container">
     <div class="header">
-        <h2> 内部链接</h2>
+        <h2>🔗 内部链接广场</h2>
         <div>
             <span id="user-display"></span>
             <button onclick="logout()" style="background:transparent; color:white; text-decoration:underline;">退出</button>
@@ -53,23 +53,24 @@
 </div>
 
 <script>
-    const supabaseUrl = 'https://kbniclprdgxtdpslwfwr.supabase.co';
-    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtibmljbHByZGd4dGRwc2x3ZndyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNjg3NzUsImV4cCI6MjA5Mjk0NDc3NX0.7753EeDPFnVxmT-Cz7yiFNPu4R0UpsKRYPuJlSknbBc';
-    const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+    const sbUrl = 'https://kbniclprdgxtdpslwfwr.supabase.co';
+    const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtibmljbHByZGd4dGRwc2x3ZndyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNjg3NzUsImV4cCI6MjA5Mjk0NDc3NX0.7753EeDPFnVxmT-Cz7yiFNPu4R0UpsKRYPuJlSknbBc';
+    
+    // 修复点：使用明确的全局作用域调用，避免变量名冲突
+    const supabaseClient = supabase.createClient(sbUrl, sbKey);
 
     const WHITELIST = ["BreadMilk233", "friend_username"];
     let currentUser = null;
 
     async function checkUser() {
-        const { data: { user }, error } = await supabase.auth.getUser();
+        const { data: { user }, error } = await supabaseClient.auth.getUser();
         if (error) return;
 
         if (user) {
             const username = user.user_metadata.user_name;
-            
             if (!WHITELIST.includes(username)) {
-                alert("权限错误：账号 " + username + " 必须严格匹配白名单大小写。");
-                await supabase.auth.signOut();
+                alert("权限错误：账号 " + username + " 不在白名单中。");
+                await supabaseClient.auth.signOut();
                 return;
             }
 
@@ -79,7 +80,7 @@
             document.getElementById('user-display').innerText = `欢迎, ${username}`;
             loadLinks();
             
-            supabase.channel('custom-all-channel')
+            supabaseClient.channel('custom-all-channel')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'links' }, payload => {
                 loadLinks();
             }).subscribe();
@@ -87,32 +88,27 @@
     }
 
     async function login() {
-        const { error } = await supabase.auth.signInWithOAuth({ 
+        const { error } = await supabaseClient.auth.signInWithOAuth({ 
             provider: 'github',
             options: { redirectTo: window.location.href }
         });
-        if (error) alert("登录启动失败: " + error.message);
+        if (error) alert("登录异常: " + error.message);
     }
 
     async function logout() {
-        await supabase.auth.signOut();
+        await supabaseClient.auth.signOut();
         location.reload();
     }
 
     async function loadLinks() {
-        const { data: links, error } = await supabase.from('links').select('*').order('id', { ascending: false });
-        if (error) {
-            console.error("加载失败:", error.message);
-            return;
-        }
-        render(links);
+        const { data: links, error } = await supabaseClient.from('links').select('*').order('id', { ascending: false });
+        if (!error) render(links);
     }
 
     function render(links) {
         const listDiv = document.getElementById('link-list');
         const hotDiv = document.getElementById('hot-list');
-        listDiv.innerHTML = '';
-        hotDiv.innerHTML = '';
+        listDiv.innerHTML = ''; hotDiv.innerHTML = '';
 
         links.forEach(item => {
             const div = document.createElement('div');
@@ -125,7 +121,6 @@
                 </div>
             `;
             listDiv.appendChild(div);
-
             if (item.votes > 3) {
                 const hot = document.createElement('div');
                 hot.innerText = `🔥 ${item.url}`;
@@ -136,19 +131,16 @@
 
     async function addLink() {
         const urlInput = document.getElementById('link-input');
-        const url = urlInput.value;
-        if (!url) return;
-        const { error } = await supabase.from('links').insert([{ url: url, author: currentUser, votes: 1 }]);
-        if (error) alert("发送失败: " + error.message);
+        if (!urlInput.value) return;
+        const { error } = await supabaseClient.from('links').insert([{ url: urlInput.value, author: currentUser, votes: 1 }]);
+        if (error) alert("发布失败: " + error.message);
         urlInput.value = '';
     }
 
     async function vote(id, delta) {
-        const { data, error } = await supabase.from('links').select('votes').eq('id', id).single();
+        const { data } = await supabaseClient.from('links').select('votes').eq('id', id).single();
         if (data) {
-            await supabase.from('links').update({ votes: data.votes + delta }).eq('id', id);
-        } else if (error) {
-            console.error("投票失败:", error.message);
+            await supabaseClient.from('links').update({ votes: data.votes + delta }).eq('id', id);
         }
     }
 
