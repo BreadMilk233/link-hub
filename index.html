@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>内部链接分享</title>
+    <title>内部链接广场 - 安全增强版</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #f0f2f5; }
@@ -13,17 +13,20 @@
         .panel { background: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow-y: auto; }
         #left { flex: 2; }
         #right { flex: 1; border-left: 4px solid #ffc107; }
-        .link-item { border-bottom: 1px solid #eee; padding: 10px 0; display: flex; justify-content: space-between; }
+        .link-item { border-bottom: 1px solid #eee; padding: 10px 0; display: flex; justify-content: space-between; align-items: center; }
         .footer { padding: 20px; background: white; display: flex; gap: 10px; border-top: 1px solid #ddd; }
-        button { cursor: pointer; border: none; border-radius: 4px; padding: 8px 15px; }
+        button { cursor: pointer; border: none; border-radius: 4px; padding: 8px 15px; transition: opacity 0.2s; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-login { background: #24292e; color: white; font-size: 1.2rem; padding: 15px 30px; }
         .btn-send { background: #28a745; color: white; }
+        .btn-delete { background: #dc3545; color: white; margin-left: 5px; font-size: 0.8rem; }
+        .url-text { color: #0366d6; text-decoration: none; word-break: break-all; }
     </style>
 </head>
 <body>
 
 <div id="auth-container">
-    <button class="btn-login" onclick="login()">使用 GitHub 账户登录</button>
+    <button class="btn-login" id="login-btn" onclick="login()">使用 GitHub 账户登录</button>
 </div>
 
 <div id="app-container">
@@ -34,7 +37,6 @@
             <button onclick="logout()" style="background:transparent; color:white; text-decoration:underline;">退出</button>
         </div>
     </div>
-
     <div class="main">
         <div id="left" class="panel">
             <h3>所有链接</h3>
@@ -45,64 +47,68 @@
             <div id="hot-list"></div>
         </div>
     </div>
-
     <div class="footer">
-        <input type="text" id="link-input" placeholder="输入链接..." style="flex:1; padding:10px;">
-        <button class="btn-send" onclick="addLink()">发送</button>
+        <input type="url" id="link-input" placeholder="请输入合法的 https:// 链接..." style="flex:1; padding:10px;">
+        <button class="btn-send" id="send-btn" onclick="addLink()">发送</button>
     </div>
 </div>
 
 <script>
     const sbUrl = 'https://kbniclprdgxtdpslwfwr.supabase.co';
     const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtibmljbHByZGd4dGRwc2x3ZndyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNjg3NzUsImV4cCI6MjA5Mjk0NDc3NX0.7753EeDPFnVxmT-Cz7yiFNPu4R0UpsKRYPuJlSknbBc';
-    
-    // 修复点：使用明确的全局作用域调用，避免变量名冲突
     const supabaseClient = supabase.createClient(sbUrl, sbKey);
-
     const WHITELIST = ["BreadMilk233", "friend_username"];
     let currentUser = null;
 
     async function checkUser() {
-        const { data: { user }, error } = await supabaseClient.auth.getUser();
-        if (error) return;
-
+        const { data: { user } } = await supabaseClient.auth.getUser();
         if (user) {
             const username = user.user_metadata.user_name;
             if (!WHITELIST.includes(username)) {
-                alert("权限错误：账号 " + username + " 不在白名单中。");
-                await supabaseClient.auth.signOut();
+                alert("未授权的访问");
+                await logout();
                 return;
             }
-
             currentUser = username;
-            document.getElementById('auth-container').style.display = 'none';
-            document.getElementById('app-container').style.display = 'flex';
-            document.getElementById('user-display').innerText = `欢迎, ${username}`;
+            showApp(username);
             loadLinks();
-            
-            supabaseClient.channel('custom-all-channel')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'links' }, payload => {
-                loadLinks();
-            }).subscribe();
+            subscribe();
         }
     }
 
+    function showApp(username) {
+        document.getElementById('auth-container').style.display = 'none';
+        document.getElementById('app-container').style.display = 'flex';
+        document.getElementById('user-display').innerText = `当前用户: ${username}`;
+    }
+
     async function login() {
-        const { error } = await supabaseClient.auth.signInWithOAuth({ 
+        const btn = document.getElementById('login-btn');
+        btn.disabled = true;
+        await supabaseClient.auth.signInWithOAuth({ 
             provider: 'github',
-            options: { redirectTo: window.location.href }
+            options: { redirectTo: window.location.origin + window.location.pathname }
         });
-        if (error) alert("登录异常: " + error.message);
     }
 
     async function logout() {
         await supabaseClient.auth.signOut();
-        location.reload();
+        window.location.href = window.location.origin + window.location.pathname;
     }
 
     async function loadLinks() {
-        const { data: links, error } = await supabaseClient.from('links').select('*').order('id', { ascending: false });
-        if (!error) render(links);
+        const { data, error } = await supabaseClient.from('links').select('*').order('id', { ascending: false });
+        if (!error) render(data);
+    }
+
+    function subscribe() {
+        supabaseClient.channel('db_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'links' }, () => {
+            loadLinks();
+        }).subscribe();
+    }
+
+    function safeTags(str) {
+        return str.replace(/[&<>"']/g, m => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[m]));
     }
 
     function render(links) {
@@ -111,30 +117,58 @@
         listDiv.innerHTML = ''; hotDiv.innerHTML = '';
 
         links.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'link-item';
-            div.innerHTML = `
-                <span><strong>${item.author}:</strong> ${item.url} (👍${item.votes})</span>
+            const isOwner = item.author === currentUser;
+            const itemEl = document.createElement('div');
+            itemEl.className = 'link-item';
+            
+            const safeUrl = safeTags(item.url);
+            const safeAuthor = safeTags(item.author);
+
+            itemEl.innerHTML = `
+                <span style="flex:1">
+                    <strong>${safeAuthor}:</strong> 
+                    <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="url-text">${safeUrl}</a>
+                    <span style="color:#888; font-size:0.8rem; margin-left:8px;">(👍${item.votes})</span>
+                </span>
                 <div>
                     <button onclick="vote(${item.id}, 1)">👍</button>
                     <button onclick="vote(${item.id}, -1)">👎</button>
+                    ${isOwner ? `<button class="btn-delete" onclick="deleteLink(${item.id})">删除</button>` : ''}
                 </div>
             `;
-            listDiv.appendChild(div);
+            listDiv.appendChild(itemEl);
+
             if (item.votes > 3) {
-                const hot = document.createElement('div');
-                hot.innerText = `🔥 ${item.url}`;
-                hotDiv.appendChild(hot);
+                const hotEl = document.createElement('div');
+                hotEl.style.padding = '5px 0';
+                hotEl.innerHTML = `🔥 <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>`;
+                hotDiv.appendChild(hotEl);
             }
         });
     }
 
     async function addLink() {
-        const urlInput = document.getElementById('link-input');
-        if (!urlInput.value) return;
-        const { error } = await supabaseClient.from('links').insert([{ url: urlInput.value, author: currentUser, votes: 1 }]);
+        const input = document.getElementById('link-input');
+        const btn = document.getElementById('send-btn');
+        const rawUrl = input.value.trim();
+
+        if (!rawUrl || !rawUrl.startsWith('http')) {
+            alert("请输入以 http 开头的完整链接");
+            return;
+        }
+
+        btn.disabled = true;
+        const { error } = await supabaseClient.from('links').insert([{ url: rawUrl, author: currentUser, votes: 1 }]);
+        
         if (error) alert("发布失败: " + error.message);
-        urlInput.value = '';
+        input.value = '';
+        btn.disabled = false;
+    }
+
+    async function deleteLink(id) {
+        if (!confirm("确认彻底删除该记录？")) return;
+        const { error } = await supabaseClient.from('links').delete().eq('id', id).eq('author', currentUser);
+        if (error) alert("删除失败，可能无权限");
     }
 
     async function vote(id, delta) {
