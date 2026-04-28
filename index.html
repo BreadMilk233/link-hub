@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title> 链接分享</title>
+    <title>内部链接分享</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #f0f2f5; }
@@ -53,16 +53,17 @@
 </div>
 
 <script>
-    const supabaseUrl = 'https://kbniclprdgxtdpslwfwr.supabase.co/rest/v1/';
+    const supabaseUrl = 'https://kbniclprdgxtdpslwfwr.supabase.co';
     const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtibmljbHByZGd4dGRwc2x3ZndyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNjg3NzUsImV4cCI6MjA5Mjk0NDc3NX0.7753EeDPFnVxmT-Cz7yiFNPu4R0UpsKRYPuJlSknbBc';
     const supabase = supabase.createClient(supabaseUrl, supabaseKey);
 
     const WHITELIST = ["BreadMilk233", "friend_username"];
-
     let currentUser = null;
 
     async function checkUser() {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (error) return;
+
         if (user) {
             const username = user.user_metadata.user_name;
             
@@ -86,10 +87,11 @@
     }
 
     async function login() {
-        await supabase.auth.signInWithOAuth({ 
+        const { error } = await supabase.auth.signInWithOAuth({ 
             provider: 'github',
             options: { redirectTo: window.location.href }
         });
+        if (error) alert("登录启动失败: " + error.message);
     }
 
     async function logout() {
@@ -98,8 +100,12 @@
     }
 
     async function loadLinks() {
-        const { data: links } = await supabase.from('links').select('*').order('id', { ascending: false });
-        if (links) render(links);
+        const { data: links, error } = await supabase.from('links').select('*').order('id', { ascending: false });
+        if (error) {
+            console.error("加载失败:", error.message);
+            return;
+        }
+        render(links);
     }
 
     function render(links) {
@@ -129,16 +135,20 @@
     }
 
     async function addLink() {
-        const url = document.getElementById('link-input').value;
+        const urlInput = document.getElementById('link-input');
+        const url = urlInput.value;
         if (!url) return;
-        await supabase.from('links').insert([{ url: url, author: currentUser, votes: 1 }]);
-        document.getElementById('link-input').value = '';
+        const { error } = await supabase.from('links').insert([{ url: url, author: currentUser, votes: 1 }]);
+        if (error) alert("发送失败: " + error.message);
+        urlInput.value = '';
     }
 
     async function vote(id, delta) {
-        const { data } = await supabase.from('links').select('votes').eq('id', id).single();
+        const { data, error } = await supabase.from('links').select('votes').eq('id', id).single();
         if (data) {
             await supabase.from('links').update({ votes: data.votes + delta }).eq('id', id);
+        } else if (error) {
+            console.error("投票失败:", error.message);
         }
     }
 
